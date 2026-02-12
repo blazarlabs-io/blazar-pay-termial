@@ -1,6 +1,7 @@
 const bleno = require("bleno");
 const sio = require("./socket");
 const txpipe = require("./services");
+const { LED } = require("./led");
 const SERVICE_UUID = "1d4ddcb2-279d-42e2-a95a-274352a25248";
 const VALUE1_CHARACTERISTIC_UUID = "a781af9a-9a04-4422-9d78-9014497ccdc0";
 const VALUE2_CHARACTERISTIC_UUID = "61b64163-35fa-438a-810c-018d1a719667";
@@ -87,14 +88,16 @@ const setupCharacteristics = (data) => {
                   amount: data.amount,
                   fundsInL2: payRes,
                 });
-                // DONE
+                LED.finishPayment(true)
               })
               .catch((error) => {
                 console.error(error);
+                LED.finishPayment(false)
               });
           })
           .catch((error) => {
             console.log(error);
+            LED.finishPayment(false)
           });
         callback(BlenoCharacteristic.RESULT_SUCCESS);
       } catch (error) {
