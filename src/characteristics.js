@@ -1,114 +1,162 @@
 const bleno = require("bleno");
-const sio = require("./socket");
 const txpipe = require("./services");
+
 const SERVICE_UUID = "1d4ddcb2-279d-42e2-a95a-274352a25248";
 const VALUE1_CHARACTERISTIC_UUID = "a781af9a-9a04-4422-9d78-9014497ccdc0";
 const VALUE2_CHARACTERISTIC_UUID = "61b64163-35fa-438a-810c-018d1a719667";
 const VALUE3_CHARACTERISTIC_UUID = "52f34145-0363-4f4e-9fab-a133e8e5b0b1";
 const WRITE1_CHARACTERISTIC_UUID = "9b16159d-7c3e-4ae6-990b-0d34f22389bb";
 
+const BlenoCharacteristic = bleno.Characteristic;
+
+function buildPaymentResult(payRes, clientAddress, merchantAddress, humanAmount) {
+  const txHash =
+    payRes?.txHash ??
+    payRes?.transactionId ??
+    payRes?.fundsUtxoRef?.txHash ??
+    (Array.isArray(payRes?.fundsInL2) ? payRes.fundsInL2[0]?.txHash : undefined);
+
+  return {
+    clientAddress,
+    merchantAddress,
+    amount: humanAmount,
+    fundsInL2: {
+      ...payRes,
+      fundsUtxoRef: {
+        txHash: txHash ?? "",
+      },
+    },
+  };
+}
+
+async function reportComplete(paymentId, payload) {
+  const { MERCHANT_BASE_URL, releaseSession } = require("./index");
+  try {
+    const res = await fetch(
+      `${MERCHANT_BASE_URL}/api/terminal/payment-complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, ...payload }),
+      },
+    );
+    if (!res.ok) {
+      console.error("[report] non-OK", res.status, await res.text());
+    } else {
+      console.log("[report] payment-complete acked");
+    }
+  } catch (err) {
+    console.error("[report] error:", err.message);
+  } finally {
+    releaseSession();
+  }
+}
+
 const setupCharacteristics = (data) => {
-  const BlenoPrimaryService = bleno.PrimaryService;
-  const BlenoCharacteristic = bleno.Characteristic;
+  const { paymentId } = data;
+  const decimals = Number.isFinite(Number(data.decimals)) ? Number(data.decimals) : 6;
+  const humanAmount = Number(data.amount);
+  const lovelace = Math.round(humanAmount * 10 ** decimals);
 
-  // const DEVICE_NAME = "Hydra TERM";
-  const multiplier = 10 ** data.decimals;
-  const value = parseInt(data.amount * multiplier);
+  const rawValue1 = String(data.address);
+  const rawValue2 = String(lovelace);
+  const rawValue3 = String(data.assetUnit || "lovelace");
 
-  const rawValue1 = data.address;
-  const rawValue2 = value.toString();
-  const rawValue3 = data.assetUnit;
-
-  const value1 = Buffer.from(rawValue1);
-  const value2 = Buffer.from(rawValue2);
-  const value3 = Buffer.from(rawValue3);
+  const value1 = Buffer.from(rawValue1, "utf8");
+  const value2 = Buffer.from(rawValue2, "utf8");
+  const value3 = Buffer.from(rawValue3, "utf8");
 
   console.log(
-    "\n\n",
-    rawValue1,
-    rawValue2,
-    rawValue3,
-    data.decimals,
-    multiplier,
-    value,
-    "\n\n"
+    "[chars] paymentId=", paymentId,
+    "merchant=", rawValue1,
+    "amountLovelace=", rawValue2,
+    "asset=", rawValue3,
+    "decimals=", decimals,
   );
+
+  let handled = false;
 
   const Char1 = new BlenoCharacteristic({
     uuid: VALUE1_CHARACTERISTIC_UUID,
     properties: ["read"],
     value: value1,
-    onReadRequest: (offset, callback) => callback(this.RESULT_SUCCESS, value1),
+    onReadRequest: (offset, callback) =>
+      callback(BlenoCharacteristic.RESULT_SUCCESS, value1),
   });
 
   const Char2 = new BlenoCharacteristic({
     uuid: VALUE2_CHARACTERISTIC_UUID,
     properties: ["read"],
     value: value2,
-    onReadRequest: (offset, callback) => callback(this.RESULT_SUCCESS, value2),
-  });
-
-  const Char3 = new BlenoCharacteristic({
-    uuid: WRITE1_CHARACTERISTIC_UUID, // New UUID
-    properties: ["read", "write"],
-    onWriteRequest: (data, offset, withoutResponse, callback) => {
-      try {
-        const clientAddress = data.toString("utf8");
-        console.log("🖊️ BLE Client wrote:", clientAddress);
-        txpipe
-          .queryFunds(clientAddress)
-          .then((res) => {
-            console.log("\n\nXXXXXXXXXXXXXXXXX");
-            console.log("[QUERY-FUND RES]", res);
-            console.log("[CLIENT ADDRESS]", clientAddress);
-            console.log("[MERCHANT ADDRESS]", rawValue1);
-            console.log("[AMOUNT TO PAY]", rawValue2);
-            console.log("[ASSET-INIT]", rawValue3);
-            console.log("[TX-HASH]", res.fundsInL2[0].txHash);
-            console.log("[INDEX]", res.fundsInL2[0].outputIndex);
-            console.log("XXXXXXXXXXXXXXXXX\n\n");
-            txpipe
-              .payMerchant(
-                clientAddress,
-                rawValue1,
-                rawValue2,
-                res.fundsInL2[0].txHash,
-                res.fundsInL2[0].outputIndex,
-                rawValue3
-              )
-              .then((payRes) => {
-                console.log("\n\nXXXXXXXXXXXXXXXXX");
-                console.log("[PAY-MERCHANT RES]", payRes);
-                console.log("XXXXXXXXXXXXXXXXX\n\n");
-                // Send back data to Merchant
-                sio.io.emit("payed", {
-                  clientAddress: clientAddress,
-                  merchantAddress: data.address,
-                  amount: data.amount,
-                  fundsInL2: payRes,
-                });
-                // DONE
-              })
-              .catch((error) => {
-                console.error(error);
-              });
-          })
-          .catch((error) => {
-            console.log(error);
-          });
-        callback(BlenoCharacteristic.RESULT_SUCCESS);
-      } catch (error) {
-        console.error("❌ Error parsing data:", error);
-        callback(BlenoCharacteristic.RESULT_UNLIKELY_ERROR);
-      }
-    },
+    onReadRequest: (offset, callback) =>
+      callback(BlenoCharacteristic.RESULT_SUCCESS, value2),
   });
 
   const Char4 = new BlenoCharacteristic({
     uuid: VALUE3_CHARACTERISTIC_UUID,
     properties: ["read"],
     value: value3,
-    onReadRequest: (offset, callback) => callback(this.RESULT_SUCCESS, value3),
+    onReadRequest: (offset, callback) =>
+      callback(BlenoCharacteristic.RESULT_SUCCESS, value3),
+  });
+
+  const Char3 = new BlenoCharacteristic({
+    uuid: WRITE1_CHARACTERISTIC_UUID,
+    properties: ["read", "write"],
+    onWriteRequest: (rawData, offset, withoutResponse, callback) => {
+      try {
+        const clientAddress = rawData.toString("utf8").trim();
+        console.log("🖊️ BLE Client wrote:", clientAddress);
+        callback(BlenoCharacteristic.RESULT_SUCCESS);
+
+        if (handled) return;
+        handled = true;
+
+        txpipe
+          .queryFunds(clientAddress)
+          .then((res) => {
+            console.log("[QUERY-FUND RES]", res);
+            const utxo = res?.fundsInL2?.[0];
+            if (!utxo) {
+              throw new Error("No L2 funds available for client wallet");
+            }
+            return txpipe.payMerchant(
+              clientAddress,
+              rawValue1,
+              rawValue2,
+              utxo.txHash,
+              utxo.outputIndex,
+              rawValue3,
+            );
+          })
+          .then((payRes) => {
+            console.log("[PAY-MERCHANT RES]", payRes);
+            return reportComplete(paymentId, {
+              result: buildPaymentResult(
+                payRes,
+                clientAddress,
+                rawValue1,
+                humanAmount,
+              ),
+            });
+          })
+          .catch((error) => {
+            console.error("[payment] error:", error);
+            return reportComplete(paymentId, {
+              error: String(error?.message ?? error),
+            });
+          });
+      } catch (error) {
+        console.error("❌ Error parsing data:", error);
+        callback(BlenoCharacteristic.RESULT_UNLIKELY_ERROR);
+        if (!handled) {
+          handled = true;
+          void reportComplete(paymentId, {
+            error: String(error?.message ?? error),
+          });
+        }
+      }
+    },
   });
 
   return { Char1, Char2, Char3, Char4 };

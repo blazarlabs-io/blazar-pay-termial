@@ -1,17 +1,15 @@
-const API_BASE_URL = "http://192.168.18.4:5000";
+const API_BASE_URL =
+  process.env.HYDRA_API_URL || "https://blazar-api.cardano.vip";
 
 async function queryFunds(address) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/query-funds?address=${address}`
-      );
-      const data = await response.json();
-      resolve(data);
-    } catch (error) {
-      reject(error);
-    }
-  });
+  const response = await fetch(
+    `${API_BASE_URL}/query-funds?address=${encodeURIComponent(address)}`,
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`query-funds ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return response.json();
 }
 
 async function payMerchant(
@@ -20,35 +18,30 @@ async function payMerchant(
   amountToPay,
   txHash,
   outputIndex,
-  assetUnit
+  assetUnit,
 ) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const payload = {
-        merchant_address: merchantAddress,
-        funds_utxo_ref: {
-          hash: txHash,
-          index: outputIndex,
-        },
-        amount: [
-          [assetUnit, parseInt(amountToPay)],
-          ["lovelace", 3000000],
-        ], // The amount of ADA (in Lovelace) to pay the merchant
-        signature: "",
-      };
-      const response = await fetch(`${API_BASE_URL}/pay-merchant`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ...payload }),
-      });
-      const data = await response.json();
-      resolve(data);
-    } catch (error) {
-      reject(error);
-    }
+  const payload = {
+    merchant_address: merchantAddress,
+    funds_utxo_ref: {
+      hash: txHash,
+      index: outputIndex,
+    },
+    amount: [
+      [assetUnit, parseInt(amountToPay, 10)],
+      ["lovelace", 3000000],
+    ],
+    signature: "",
+  };
+  const response = await fetch(`${API_BASE_URL}/pay-merchant`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`pay-merchant ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return response.json();
 }
 
 module.exports = {
