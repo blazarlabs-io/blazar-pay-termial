@@ -206,8 +206,7 @@ check_project() {
     
     check "package.json exists" "[ -f package.json ]" "true"
     check "src/index.js exists" "[ -f src/index.js ]" "true"
-    check "src/socket.js exists" "[ -f src/socket.js ]" "true"
-    check "src/services.js exists" "[ -f src/services.js ]" "true"
+    check "src/payment.js exists" "[ -f src/payment.js ]" "true"
     check "src/characteristics.js exists" "[ -f src/characteristics.js ]" "true"
     
     # Check if node_modules exists
@@ -246,22 +245,10 @@ check_network() {
 check_api_config() {
     log_info "Checking API configuration..."
     
-    if [ -f src/services.js ]; then
-        if grep -q "API_BASE_URL" src/services.js; then
-            local api_url=$(grep "API_BASE_URL" src/services.js | head -1 | cut -d'"' -f2)
-            log_info "API URL configured: $api_url"
-            
-            # Try to reach the API (this might fail if API is not running)
-            if command_exists curl; then
-                if timeout 5 curl -s "$api_url" &>/dev/null; then
-                    log_success "API server is reachable"
-                else
-                    log_warning "API server is not reachable (might be normal if not running)"
-                fi
-            fi
-        else
-            log_error "API_BASE_URL not found in src/services.js"
-        fi
+    if [ -f .env ] && grep -q '^API_BASE_URL=.' .env && grep -q '^TERMINAL_API_KEY=.' .env; then
+        log_success ".env has API_BASE_URL and TERMINAL_API_KEY"
+    else
+        log_error ".env missing API_BASE_URL or TERMINAL_API_KEY (see .env.example)"
     fi
 }
 

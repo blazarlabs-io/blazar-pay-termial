@@ -21,11 +21,19 @@ chmod +x setup.sh
 
 ### 3. Configure API Endpoint
 
-Edit `src/services.js` and update the API URL:
+Copy `.env.example` to `.env` and set the required values (there are no defaults; the terminal exits at start if either is missing):
 
-```javascript
-const API_BASE_URL = "http://your-api-server:5000";
+```bash
+cp .env.example .env
+# API_BASE_URL=https://<backend>        (required)
+# TERMINAL_API_KEY=<device key>         (required, sent as Bearer)
+# TERMINAL_POLL_INTERVAL_MS=1000        (optional)
 ```
+
+Flow: the terminal polls `GET /terminal/pending-payment`, advertises the payment over BLE
+(read-only value1 merchantAddress, value2 amountBaseUnits verbatim, value3 assetUnit,
+value4 paymentId), polls `GET /payments/:id` until confirmed, failed or expired, then ends the session.
+The terminal never authorizes or sends payments. Run tests with `npm test`.
 
 ### 4. Start the Terminal
 

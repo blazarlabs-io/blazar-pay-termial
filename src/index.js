@@ -1,10 +1,16 @@
 require("./load-env");
+const { loadConfig, fetchPending, watchPayment } = require("./payment");
+
+let cfg;
+try {
+  cfg = loadConfig();
+} catch (err) {
+  console.error(`[boot] ${err.message} (see .env.example)`);
+  process.exit(1);
+}
+
 const bleno = require("bleno");
 const characteristics = require("./characteristics");
-
-const MERCHANT_BASE_URL =
-  process.env.MERCHANT_BASE_URL || "http://192.168.0.103:3000";
-const POLL_INTERVAL_MS = Number(process.env.TERMINAL_POLL_INTERVAL_MS) || 1000;
 
 const BlenoPrimaryService = bleno.PrimaryService;
 
@@ -33,11 +39,11 @@ function attachBlenoListenersOnce() {
       return;
     }
     if (!activeCharacteristics) return;
-    const { Char1, Char2, Char3, Char4 } = activeCharacteristics;
+    
     bleno.setServices([
       new BlenoPrimaryService({
         uuid: characteristics.SERVICE_UUID,
-        characteristics: [Char1, Char2, Char3, Char4],
+        characteristics: activeCharacteristics,
       }),
     ]);
   });
@@ -72,27 +78,19 @@ function endBleSession() {
 async function pollOnce() {
   if (busy) return;
   try {
-    const res = await fetch(`${MERCHANT_BASE_URL}/api/terminal/pending-payment`);
-    if (res.status === 204) return;
-    if (!res.ok) {
-      console.error("[poll] non-OK status", res.status);
-      return;
-    }
-    const payment = await res.json();
-    console.log("[poll] new payment", payment.paymentId);
+    const payment = await fetchPending(cfg);
+    if (!payment) return;
+    console.log("[poll] new payment", payment.paymentId, payment.state);
     busy = true;
     startBleSession(payment);
+    const final = await watchPayment(cfg, payment);
+    console.log(`[session] ${payment.paymentId} ended: ${final}`);
+    endBleSession();
   } catch (err) {
     console.error("[poll] error:", err.message);
+    if (busy) endBleSession();
   }
 }
 
-// Exposed so characteristics.js can mark the session done after reporting.
-function releaseSession() {
-  endBleSession();
-}
-
-module.exports = { releaseSession, MERCHANT_BASE_URL };
-
-console.log(`[boot] polling ${MERCHANT_BASE_URL} every ${POLL_INTERVAL_MS}ms`);
-setInterval(pollOnce, POLL_INTERVAL_MS);
+console.log(`[boot] polling ${cfg.baseUrl} every ${cfg.pollMs}ms`);
+setInterval(pollOnce, cfg.pollMs);
