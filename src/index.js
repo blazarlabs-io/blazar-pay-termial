@@ -18,6 +18,16 @@ let busy = false;
 let blenoListenersAttached = false;
 let activeCharacteristics = null;
 
+function applyServices() {
+  if (!activeCharacteristics) return;
+  bleno.setServices([
+    new BlenoPrimaryService({
+      uuid: characteristics.SERVICE_UUID,
+      characteristics: activeCharacteristics,
+    }),
+  ]);
+}
+
 function attachBlenoListenersOnce() {
   if (blenoListenersAttached) return;
   blenoListenersAttached = true;
@@ -38,14 +48,7 @@ function attachBlenoListenersOnce() {
       console.error("[BLE] advertisingStart error:", error);
       return;
     }
-    if (!activeCharacteristics) return;
-    
-    bleno.setServices([
-      new BlenoPrimaryService({
-        uuid: characteristics.SERVICE_UUID,
-        characteristics: activeCharacteristics,
-      }),
-    ]);
+    applyServices();
   });
 
   bleno.on("disconnect", () => {
@@ -59,6 +62,9 @@ function startBleSession(payment) {
 
   if (bleno.state === "poweredOn") {
     bleno.startAdvertising("Hydra TERM", [characteristics.SERVICE_UUID]);
+    // Register the service now too: after a stop/start pair on back-to-back sessions
+    // "advertisingStart" may not fire again, which left the second payment without its GATT service.
+    applyServices();
   } else {
     console.log(
       "[BLE] adapter not poweredOn yet (",
