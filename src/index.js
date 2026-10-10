@@ -1,5 +1,5 @@
 require("./load-env");
-const { loadConfig, fetchPending, watchPayment } = require("./payment");
+const { loadConfig, fetchPending, watchPayment, exclusive } = require("./payment");
 
 let cfg;
 try {
@@ -14,7 +14,6 @@ const characteristics = require("./characteristics");
 
 const BlenoPrimaryService = bleno.PrimaryService;
 
-let busy = false;
 let blenoListenersAttached = false;
 let activeCharacteristics = null;
 
@@ -78,25 +77,23 @@ function endBleSession() {
   activeCharacteristics = null;
   bleno.stopAdvertising();
   bleno.setServices([]);
-  busy = false;
 }
 
 async function pollOnce() {
-  if (busy) return;
+  let payment = null;
   try {
-    const payment = await fetchPending(cfg);
+    payment = await fetchPending(cfg);
     if (!payment) return;
     console.log("[poll] new payment", payment.paymentId, payment.state);
-    busy = true;
     startBleSession(payment);
     const final = await watchPayment(cfg, payment);
     console.log(`[session] ${payment.paymentId} ended: ${final}`);
     endBleSession();
   } catch (err) {
     console.error("[poll] error:", err.message);
-    if (busy) endBleSession();
+    if (payment) endBleSession();
   }
 }
 
 console.log(`[boot] polling ${cfg.baseUrl} every ${cfg.pollMs}ms`);
-setInterval(pollOnce, cfg.pollMs);
+setInterval(exclusive(pollOnce), cfg.pollMs);

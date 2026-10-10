@@ -1,13 +1,20 @@
 // Pure payment logic (no BLE), so it can be tested without bleno.
 const TERMINAL_STATES = ["confirmed", "failed", "expired"];
+const REQUEST_TIMEOUT_MS = 10_000;
+const EXPIRY_SLACK_MS = 5_000; // the Pi has no RTC: let the backend report `expired` first
 
 function loadConfig(env = process.env) {
   const missing = ["API_BASE_URL", "TERMINAL_API_KEY"].filter((k) => !env[k]);
   if (missing.length) {
     throw new Error(`Missing required env: ${missing.join(", ")}`);
   }
+  const baseUrl = env.API_BASE_URL.replace(/\/+$/, "");
+  const { protocol, hostname } = new URL(baseUrl);
+  if (protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
+    throw new Error("API_BASE_URL must be https: every request carries the device key");
+  }
   return {
-    baseUrl: env.API_BASE_URL.replace(/\/+$/, ""),
+    baseUrl,
     apiKey: env.TERMINAL_API_KEY,
     pollMs: Number(env.TERMINAL_POLL_INTERVAL_MS) || 1000,
   };
@@ -26,6 +33,7 @@ function paymentValues(p) {
 async function getJson(cfg, path, fetchFn) {
   const res = await fetchFn(`${cfg.baseUrl}${path}`, {
     headers: { Authorization: `Bearer ${cfg.apiKey}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   return res;
 }
@@ -42,14 +50,15 @@ async function fetchPending(cfg, fetchFn = fetch) {
   return p;
 }
 
-// Polls the payment until a terminal state or expiresAt; returns the final state.
+// Polls the payment until a terminal state; returns it. Only a `created` payment ends locally at
+// expiresAt (backend unreachable): an authorized one may still confirm after it.
 async function watchPayment(cfg, payment, opts = {}) {
   const { fetchFn = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     now = Date.now, log = console.log } = opts;
-  const deadline = Date.parse(payment.expiresAt);
+  const deadline = Date.parse(payment.expiresAt) + EXPIRY_SLACK_MS;
   let last = payment.state;
   while (true) {
-    if (!(now() < deadline)) {
+    if (last === "created" && !(now() < deadline)) {
       log(`[payment ${payment.paymentId}] expiresAt reached`);
       return "expired";
     }
@@ -69,4 +78,18 @@ async function watchPayment(cfg, payment, opts = {}) {
   }
 }
 
-module.exports = { loadConfig, paymentValues, fetchPending, watchPayment, TERMINAL_STATES };
+// Skips a tick while the previous run is still going: setInterval ticks must not start a second session.
+function exclusive(fn) {
+  let running = false;
+  return async () => {
+    if (running) return;
+    running = true;
+    try {
+      await fn();
+    } finally {
+      running = false;
+    }
+  };
+}
+
+module.exports = { loadConfig, paymentValues, fetchPending, watchPayment, exclusive, TERMINAL_STATES };
