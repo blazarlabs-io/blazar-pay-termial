@@ -89,9 +89,8 @@ if [[ -f "${INSTALL_DIR}/.env" ]]; then
   source "${INSTALL_DIR}/.env" 2>/dev/null || true
   url="${API_BASE_URL:-}"
   if [[ -n "$url" ]]; then
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
-      -H "Authorization: Bearer ${TERMINAL_API_KEY:-}" \
-      "${url}/terminal/pending-payment" 2>/dev/null || echo 000)"
+    code="$(printf 'Authorization: Bearer %s\n' "${TERMINAL_API_KEY:-}" | curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+      -H @- "${url}/terminal/pending-payment" 2>/dev/null || echo 000)"
     if [[ "$code" == "204" || "$code" == "200" ]]; then
       pass "Backend ${url} → HTTP ${code}"
     else

@@ -6,7 +6,7 @@
 # agent, and systemd units so the terminal starts on boot.
 #
 # Usage (on the Pi, as a normal user with sudo):
-#   API_BASE_URL=https://<backend> TERMINAL_API_KEY=<device key> ./scripts/raspberry-pi-setup.sh
+#   API_BASE_URL=https://<backend> ./scripts/raspberry-pi-setup.sh   (prompts for the device key, input hidden)
 #
 # Run from a git checkout of this repo (src/ is the single source deployed).
 #
@@ -34,6 +34,10 @@ die()  { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 API_BASE_URL="${API_BASE_URL:-}"
 TERMINAL_API_KEY="${TERMINAL_API_KEY:-}"
+# Prefer typing the key at a hidden prompt over putting it on the command line (shell history)
+if [[ -z "$TERMINAL_API_KEY" && -t 0 ]]; then
+  read -rsp "Terminal device key (input hidden): " TERMINAL_API_KEY; echo
+fi
 TERMINAL_POLL_INTERVAL_MS="${TERMINAL_POLL_INTERVAL_MS:-1000}"
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/blazar-pay-termial}"
 TERMINAL_USER="${TERMINAL_USER:-$(whoami)}"
@@ -295,9 +299,9 @@ smoke_test() {
   fi
 
   local code
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
-    -H "Authorization: Bearer ${TERMINAL_API_KEY}" \
-    "${API_BASE_URL}/terminal/pending-payment" || echo "000")"
+  # Header via stdin so the device key never appears in the process list
+  code="$(printf 'Authorization: Bearer %s\n' "${TERMINAL_API_KEY}" | curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+    -H @- "${API_BASE_URL}/terminal/pending-payment" || echo "000")"
   if [[ "$code" == "204" || "$code" == "200" ]]; then
     ok "Backend reachable (${API_BASE_URL}) HTTP ${code}"
   else
