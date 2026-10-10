@@ -21,3 +21,12 @@ The terminal polls `GET /terminal/pending-payment`, advertises the payment over 
 characteristics (value1 merchantAddress, value2 amountBaseUnits verbatim, value3 assetUnit,
 value4 paymentId), polls `GET /payments/:id` until confirmed, failed or expired, then ends the session.
 Run `npm test` for the unit tests. See QUICK_START.md.
+
+M3 runs on Cardano preprod only (BTC bridged from Bitcoin testnet3) against the custodial demo
+backend `https://blazar-api.cardano.vip`. Contactless transport: BLE. The terminal never authorizes,
+signs or sends payments, and nothing is written to it over BLE. Node.js 18+ is required.
+One-shot setup on a Raspberry Pi:
+
+```bash
+API_BASE_URL=https://<backend> TERMINAL_API_KEY=<device key> ./scripts/raspberry-pi-setup.sh
+```

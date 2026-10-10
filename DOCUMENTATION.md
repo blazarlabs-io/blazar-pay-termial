@@ -13,46 +13,53 @@
 9. [Usage Guide](#usage-guide)
 10. [Troubleshooting](#troubleshooting)
 11. [Development](#development)
+12. [Known Limitations](#known-limitations)
 
 ## Overview
 
-The Hydra Terminal is a Bluetooth Low Energy (BLE) payment terminal designed for the Hydrapay micropayments system. It operates as a contactless payment terminal that communicates with mobile devices via BLE to facilitate secure micropayments using Cardano blockchain technology.
+The Hydra Terminal is a Bluetooth Low Energy (BLE) payment terminal for the Hydrapay micropayments system. It runs on a Raspberry Pi Zero 2W and shows the merchant's pending payment request to the payer's phone. It is a display device: it never moves money, never signs anything and never authorizes a payment.
+
+Milestone 3 (USDM and BTC payments) runs on **Cardano preprod** only, with BTC bridged from **Bitcoin testnet3**, against the custodial demo backend `https://blazar-api.cardano.vip` (`blazar-hydra`).
 
 ### Key Features
 
-- **BLE Beacon Functionality**: Acts as a discoverable BLE peripheral device
-- **Real-time Communication**: Uses WebSocket for real-time communication with merchant applications
-- **Cardano Integration**: Handles ADA and custom asset micropayments
-- **Raspberry Pi Compatible**: Optimized for Raspberry Pi Zero 2W hardware
-- **Secure Payment Processing**: Implements secure payment verification and processing
+- **Backend-driven**: polls the backend for the merchant's pending payment request; there is no local server and no merchant connection to the terminal
+- **Read-only BLE**: exposes the request through four read-only characteristics, including the backend `paymentId`
+- **Exact amounts**: the amount is passed through verbatim as an integer string in base units (ADA and USDM 6 decimals, BTC 8)
+- **ADA, USDM and BTC**: any asset the backend accepts; the terminal has no asset-specific code
+- **Raspberry Pi Compatible**: optimized for Raspberry Pi Zero 2W hardware
 
 ## Architecture
 
-The system consists of several interconnected components:
-
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Mobile App    │◄──►│  Hydra Terminal │◄──►│  Hydra API      │
-│   (BLE Client)  │    │  (BLE Server)   │    │  (Backend)      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────────┐
-                       │  Merchant App   │
-                       │  (WebSocket)    │
-                       └─────────────────┘
+┌─────────────────┐  POST /payments   ┌──────────────────────┐
+│  Merchant web   │──────────────────►│                      │
+└─────────────────┘                   │                      │
+                                      │   Hydra Pay backend  │
+┌─────────────────┐  GET /terminal/   │   (custodial, owns   │
+│  Hydra Terminal │  pending-payment  │   the payment state) │
+│  (BLE server)   │──────────────────►│                      │
+└────────┬────────┘  GET /payments/:id│                      │
+         │ BLE read (value1..4)       │                      │
+┌────────▼────────┐  POST /payments/  │                      │
+│   Mobile App    │  :id/authorize    │                      │
+│   (BLE client)  │──────────────────►│                      │
+└─────────────────┘                   └──────────┬───────────┘
+                                                 │ NewTx / SnapshotConfirmed
+                                      ┌──────────▼───────────┐
+                                      │  Hydra head (preprod)│
+                                      └──────────────────────┘
 ```
 
 ### Component Responsibilities
 
-- **Mobile App**: Initiates payment by connecting to BLE terminal
+- **Merchant web**: creates the payment request (asset and exact amount) and watches it until it is final
 - **Hydra Terminal**:
-  - Advertises BLE services for payment discovery
-  - Exchanges payment data via BLE characteristics
-  - Communicates with backend API for payment processing
-  - Notifies merchant application of payment status
-- **Hydra API**: Handles fund queries and payment processing
-- **Merchant App**: Manages payment requests and receives payment confirmations
+  - polls the backend for the merchant's pending request
+  - advertises it over BLE as read-only characteristics
+  - watches the payment until it is `confirmed`, `failed` or `expired`, then stops advertising
+- **Mobile App**: reads the request over BLE, checks it against the backend record, and the payer authorizes it with an authenticated call to the backend
+- **Backend**: owns the payment record, executes the authorized payment in the Hydra head and reports `confirmed` only after the Hydra snapshot that contains the transaction is confirmed
 
 ## Hardware Requirements
 
@@ -82,9 +89,8 @@ The system consists of several interconnected components:
 
 3. **Network Configuration**:
 
-   - Stable WiFi connection for API communication
-   - Ensure port 3000 is available for WebSocket server
-   - Configure firewall if necessary
+   - Stable WiFi connection with outbound HTTPS access to the backend
+   - No inbound port is needed: the terminal only makes outgoing requests
 
 4. **Power Requirements**:
    - 5V/2.5A power supply (USB-C)
@@ -101,7 +107,7 @@ The system consists of several interconnected components:
 ### System Requirements
 
 - **Operating System**: Linux (Raspberry Pi OS recommended)
-- **Node.js**: Version 16.x or higher
+- **Node.js**: Version 18 or higher (the built-in `fetch` is used)
 - **npm**: Version 8.x or higher
 - **Bluetooth Stack**: BlueZ 5.50 or higher
 
@@ -109,38 +115,37 @@ The system consists of several interconnected components:
 
 ```json
 {
-  "bleno": "@abandonware/bleno@^0.6.2",
-  "express": "^5.1.0",
-  "socket.io": "^4.8.1"
+  "bleno": "npm:@abandonware/bleno@^0.6.2"
 }
 ```
 
-### Package Descriptions
-
 - **bleno**: BLE peripheral library for Node.js (abandonware fork with continued support)
-- **express**: Web framework for HTTP server
-- **socket.io**: Real-time bidirectional event-based communication
+- **nodemon** (dev only): auto-restart for `npm run dev`
 
 ## Installation & Setup
 
-### 1. System Preparation
+The quickest path is the one-shot script; see [INSTALLATION.md](./INSTALLATION.md) for the step-by-step alternative.
 
 ```bash
-# Update system packages
-sudo apt update && sudo apt upgrade -y
-
-# Install Node.js (using NodeSource repository)
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Install Bluetooth development libraries
-sudo apt-get install -y bluetooth bluez libbluetooth-dev
-
-# Install build tools
-sudo apt-get install -y build-essential
+git clone <repository-url> blazar-pay-termial && cd blazar-pay-termial
+API_BASE_URL=https://<backend> TERMINAL_API_KEY=<device key> ./scripts/raspberry-pi-setup.sh
 ```
 
-### 2. Bluetooth Configuration
+It installs the system packages and Node.js, applies Bluetooth boot fixes, deploys `src/`, writes `.env` and enables the `hydra-terminal` systemd service (the unit reads `.env` through `EnvironmentFile`).
+
+### Configuration
+
+Copy `.env.example` to `.env` (ignored by git) and set:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `API_BASE_URL` | yes | Backend base URL, e.g. `https://blazar-api.cardano.vip`. No default |
+| `TERMINAL_API_KEY` | yes | Device key of the merchant account, issued by the backend operator, sent as `Authorization: Bearer`. No default |
+| `TERMINAL_POLL_INTERVAL_MS` | no | Poll interval, default 1000 |
+
+If a required variable is missing, the process exits at start with `Missing required env: ...`.
+
+### Bluetooth Configuration
 
 ```bash
 # Enable Bluetooth service
@@ -150,63 +155,8 @@ sudo systemctl start bluetooth
 # Add user to bluetooth group
 sudo usermod -a -G bluetooth $USER
 
-# Configure Bluetooth to run without authentication
-sudo nano /etc/bluetooth/main.conf
-# Add or modify:
-# [General]
-# ControllerMode = dual
-# DiscoverableTimeout = 0
-# PairableTimeout = 0
-```
-
-### 3. Application Setup
-
-```bash
-# Clone or download the application
-cd /opt
-sudo git clone <repository-url> hydra-terminal
-cd hydra-terminal
-
-# Install dependencies
-npm install
-
-# Set proper permissions
-sudo chown -R $USER:$USER /opt/hydra-terminal
-chmod +x src/index.js
-```
-
-### 4. Service Configuration (Optional)
-
-Create a systemd service for automatic startup:
-
-```bash
-sudo nano /etc/systemd/system/hydra-terminal.service
-```
-
-```ini
-[Unit]
-Description=Hydra Terminal BLE Payment Service
-After=bluetooth.service
-Wants=bluetooth.service
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/opt/hydra-terminal
-ExecStart=/usr/bin/node src/index.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start the service:
-
-```bash
-sudo systemctl enable hydra-terminal.service
-sudo systemctl start hydra-terminal.service
+# Allow Node.js to use raw BLE sockets
+sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
 ```
 
 ## BLE Protocol Implementation
@@ -219,166 +169,85 @@ Service UUID: 1d4ddcb2-279d-42e2-a95a-274352a25248
 
 ### Characteristics
 
-#### 1. Merchant Address (Read-Only)
+All characteristics are **read-only** UTF-8 strings, set from the backend payment record.
 
-- **UUID**: `a781af9a-9a04-4422-9d78-9014497ccdc0`
-- **Properties**: Read
-- **Purpose**: Contains the merchant's Cardano address
-- **Data Format**: UTF-8 string
+| # | UUID | Name | Value |
+|---|---|---|---|
+| value1 | `a781af9a-9a04-4422-9d78-9014497ccdc0` | Merchant Address | Merchant's Cardano address |
+| value2 | `61b64163-35fa-438a-810c-018d1a719667` | Payment Amount | `amountBaseUnits`, verbatim (integer string in base units, never converted) |
+| value3 | `52f34145-0363-4f4e-9fab-a133e8e5b0b1` | Asset Unit | `lovelace`, or policy id + asset name hex |
+| value4 | `44f2e2a5-f323-44a2-bfbb-4afe3ef2b3ba` | Payment Id | Backend `paymentId` (UUID) |
 
-#### 2. Payment Amount (Read-Only)
-
-- **UUID**: `61b64163-35fa-438a-810c-018d1a719667`
-- **Properties**: Read
-- **Purpose**: Contains the payment amount in smallest unit
-- **Data Format**: UTF-8 string (integer)
-
-#### 3. Asset Unit (Read-Only)
-
-- **UUID**: `52f34145-0363-4f4e-9fab-a133e8e5b0b1`
-- **Properties**: Read
-- **Purpose**: Specifies the asset being used for payment
-- **Data Format**: UTF-8 string (e.g., "lovelace", "asset_policy_id")
-
-#### 4. Client Address (Read/Write)
-
-- **UUID**: `9b16159d-7c3e-4ae6-990b-0d34f22389bb`
-- **Properties**: Read, Write
-- **Purpose**: Receives client's Cardano address for payment processing
-- **Data Format**: UTF-8 string
+The former write characteristic for the client address (`9b16159d-…`) is retired: a BLE write never moves money. The phone reads value1..4, loads `GET /payments/:paymentId` from the backend and aborts if the values differ from the backend record.
 
 ### BLE Advertising
 
 - **Device Name**: "Hydra TERM"
 - **Service UUIDs**: `1d4ddcb2-279d-42e2-a95a-274352a25248`
 - **Connectable**: Yes
-- **Discoverable**: Yes
+- **When**: only while a payment request is pending; advertising stops when the payment is final
 
 ## API Integration
 
-### Backend API Configuration
+Every request sends `Authorization: Bearer <TERMINAL_API_KEY>`. The backend maps the device key to the merchant account; a terminal key cannot authorize payments.
 
-The terminal communicates with a Hydra API backend for payment processing:
+| Endpoint | Purpose | Response |
+|---|---|---|
+| `GET /terminal/pending-payment` | The merchant's oldest unexpired request in state `created` | 200 `Payment`, or 204 when nothing is pending |
+| `GET /payments/:id` | State of the advertised payment | 200 `Payment` |
 
-```javascript
-const API_BASE_URL = "http://<your.service.ip.address>:5000";
-```
-
-Make sure you use an https server for hosting the back-end sydra service in production.
-
-### API Endpoints
-
-#### 1. Query Funds
-
-- **Endpoint**: `GET /query-funds?address={clientAddress}`
-- **Purpose**: Retrieves available funds for a client address
-- **Response**: Object containing `fundsInL2` array with UTXO references
-
-#### 2. Pay Merchant
-
-- **Endpoint**: `POST /pay-merchant`
-- **Purpose**: Processes payment from client to merchant
-- **Request Body**:
-
-```json
-{
-  "merchant_address": "string",
-  "funds_utxo_ref": {
-    "hash": "string",
-    "index": "number"
-  },
-  "amount": [
-    ["asset_unit", amount_in_smallest_unit],
-    ["lovelace", 3000000]
-  ],
-  "signature": "string"
-}
-```
-
-### WebSocket Server
-
-- **Port**: 3000
-- **CORS**: Configured for `http://localhost:3000`
-- **Events**:
-  - `requestFunds`: Initiates payment process
-  - `payed`: Notifies merchant of successful payment
-  - `disconnect`: Handles client disconnection
+`Payment` fields used by the terminal: `paymentId`, `merchantAddress`, `assetUnit`, `amountBaseUnits`, `state`, `expiresAt`. States: `created → authorized → submitted → confirmed`, or `failed` / `expired`. A request expires 120 s after it is created, and a new request from the merchant expires the previous unpaid one.
 
 ## Payment Flow
 
-### 1. Payment Initiation
+1. The merchant creates a request in the merchant web (`POST /payments`, state `created`).
+2. The terminal's poll (`GET /terminal/pending-payment`, every `TERMINAL_POLL_INTERVAL_MS`) returns it. The terminal sets value1..4 and starts advertising "Hydra TERM".
+3. The payer's phone, held close to the terminal, connects, reads value1..4 and disconnects.
+4. The phone cross-checks the values with `GET /payments/:paymentId` and shows the amount from the backend. The payer taps Pay; the phone calls `POST /payments/:paymentId/authorize` with the payer's Firebase ID token. This authenticated call is the payer's consent.
+5. The backend submits the Hydra transaction and sets `confirmed` once the snapshot containing it is confirmed.
+6. The terminal polls `GET /payments/:paymentId` and logs every state change. On `confirmed`, `failed`, `expired` or when `expiresAt` passes, it stops advertising, clears its services and goes back to polling.
 
-1. Merchant application sends `requestFunds` event via WebSocket
-2. Terminal receives payment data (amount, merchant address, asset unit)
-3. BLE service starts advertising with payment information
-4. Characteristics are configured with payment details
-
-### 2. Client Connection
-
-1. Mobile app discovers "Hydra TERM" BLE device
-2. Client connects to BLE service
-3. Client reads payment details from characteristics:
-   - Merchant address (Char1)
-   - Payment amount (Char2)
-   - Asset unit (Char4)
-
-### 3. Payment Processing
-
-1. Client writes their address to Char3 (write characteristic)
-2. Terminal queries client funds via API
-3. Terminal processes payment via API
-4. Terminal notifies merchant of payment status
-
-### 4. Payment Completion
-
-1. Merchant receives `payed` event with payment details
-2. BLE advertising stops
-3. Service resets for next payment
+The merchant web and the phone read the same backend record, so they show the same result.
 
 ## Usage Guide
 
 ### Starting the Terminal
 
 ```bash
+# Production mode
+npm start
+
 # Development mode with auto-restart
 npm run dev
 
-# Production mode
-node src/index.js
-```
-
-### Merchant Integration
-
-```javascript
-// Connect to terminal WebSocket
-const socket = io("http://terminal-ip:3000");
-
-// Request payment
-socket.emit("requestFunds", {
-  address: "merchant_cardano_address",
-  amount: 10.5, // Payment amount
-  decimals: 6, // Asset decimals
-  assetUnit: "lovelace", // Asset identifier
-});
-
-// Listen for payment confirmation
-socket.on("payed", (paymentData) => {
-  console.log("Payment received:", paymentData);
-});
+# As a service (after scripts/raspberry-pi-setup.sh)
+sudo systemctl start hydra-terminal.service
 ```
 
 ### Monitoring
 
-- Check terminal logs for BLE and payment activity
-- Monitor WebSocket connections
-- Verify API connectivity
-- Check Bluetooth status: `sudo systemctl status bluetooth`
+```bash
+sudo journalctl -u hydra-terminal.service -f
+```
+
+Typical log lines:
+
+```
+[boot] polling https://<backend> every 1000ms
+[poll] new payment <paymentId> created
+[payment <paymentId>] created -> confirmed
+[session] <paymentId> ended: confirmed
+```
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### 1. BLE Advertising Not Working
+#### 1. Terminal exits at start
+
+`Missing required env: ...`: create `.env` from `.env.example` and set `API_BASE_URL` and `TERMINAL_API_KEY`.
+
+#### 2. BLE Advertising Not Working
 
 ```bash
 # Check Bluetooth status
@@ -391,7 +260,9 @@ sudo systemctl restart bluetooth
 sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
 ```
 
-#### 2. Permission Denied Errors
+Remember that the terminal advertises only while a request is pending.
+
+#### 3. Permission Denied Errors
 
 ```bash
 # Add user to bluetooth group
@@ -402,18 +273,18 @@ sudo usermod -a -G bluetooth $USER
 sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
 ```
 
-#### 3. API Connection Issues
+#### 4. API Connection Issues
 
-- Verify API server is running and accessible
-- Check network connectivity
-- Verify API_BASE_URL configuration
-- Check firewall settings
+```bash
+set -a; . ./.env; set +a
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TERMINAL_API_KEY" \
+  "$API_BASE_URL/terminal/pending-payment"
+```
 
-#### 4. WebSocket Connection Problems
-
-- Ensure port 3000 is available
-- Check CORS configuration
-- Verify client connection URL
+- `204`: connected, nothing pending; `200`: a request is pending
+- `401` / `403`: the device key is wrong or not mapped to a merchant account
+- `000`: no network or wrong `API_BASE_URL`
+- `[poll] error: pending-payment HTTP <code>` in the log points to the same causes
 
 ### Debug Commands
 
@@ -426,76 +297,59 @@ sudo journalctl -u bluetooth -f
 
 # Check Node.js process
 ps aux | grep node
-
-# Monitor network connections
-netstat -tulpn | grep :3000
 ```
-
-### Log Analysis
-
-The application provides detailed logging for:
-
-- BLE state changes
-- Payment processing steps
-- API communication
-- WebSocket events
-- Error conditions
 
 ## Development
 
 ### Project Structure
 
 ```
-hydra-terminal/
+blazar-pay-termial/
 ├── src/
-│   ├── index.js          # Main application entry point
-│   ├── socket.js         # WebSocket server configuration
-│   ├── services.js       # API integration functions
-│   └── characteristics.js # BLE characteristics implementation
-├── assets/               # Documentation images
-├── package.json         # Dependencies and scripts
-└── README.md           # Basic project information
+│   ├── index.js           # Entry point: env check, poll loop, BLE session
+│   ├── payment.js         # Pure payment logic: config, pending-payment fetch, watcher (no BLE)
+│   ├── characteristics.js # Four read-only BLE characteristics
+│   └── load-env.js        # Loads .env
+├── test/
+│   └── payment.test.js    # Unit tests (node --test)
+├── scripts/
+│   ├── raspberry-pi-setup.sh     # One-shot Pi setup and systemd service
+│   └── raspberry-pi-validate.sh  # Checks a Pi installation
+├── .env.example
+└── package.json
 ```
 
 ### Development Setup
 
 1. Clone the repository
 2. Install dependencies: `npm install`
-3. Configure API endpoint in `services.js`
+3. `cp .env.example .env` and set `API_BASE_URL` and `TERMINAL_API_KEY`
 4. Run in development mode: `npm run dev`
-
-### Code Architecture
-
-- **Modular Design**: Each component has a specific responsibility
-- **Event-Driven**: Uses WebSocket and BLE events for communication
-- **Error Handling**: Comprehensive error handling throughout
-- **Async Operations**: Proper handling of asynchronous API calls
 
 ### Testing
 
-- Test BLE functionality with mobile BLE scanner apps
-- Verify API integration with test endpoints
-- Test WebSocket communication with merchant applications
-- Validate payment flows end-to-end
+```bash
+npm test
+```
+
+The unit tests mock `fetch` and need no BLE adapter: config fail-fast, value2 passed through verbatim (including a 30-digit amount), pending-payment parsing with the Bearer header and 204, session end on `confirmed` / `failed` / `expired`, and end at `expiresAt`.
+
+For an end-to-end check, create a request in the merchant web and pay it with the mobile app; the log shows the state changes and the merchant web shows the same final state.
 
 ### Security Considerations
 
-- BLE communication is not encrypted (consider additional security layers)
-- API communication should use HTTPS in production
-- Implement proper authentication for merchant applications
-- Consider rate limiting for payment requests
+- BLE data is public and unencrypted. It contains only the request (merchant address, amount, asset, payment id); nothing secret is advertised and nothing is accepted over BLE.
+- Use an `https://` `API_BASE_URL`; the device key is sent on every poll.
+- Keep `TERMINAL_API_KEY` only in `.env` on the device (ignored by git).
+
+## Known Limitations
+
+- Testnet/preprod only; custodial demo backend. One merchant, one terminal per merchant account.
+- Contactless transport: BLE. Proximity is a phone-side RSSI heuristic.
+- The device key has the full scope of the merchant account (it can also create payment requests); protect the SD card.
+- The local expiry check uses the Pi clock; keep NTP time sync enabled.
+- The terminal has been unit-tested; a BLE session on a Raspberry Pi against the live backend has not been recorded yet.
 
 ---
 
-## Support
-
-For technical support or questions regarding the Hydra Terminal:
-
-- Check the troubleshooting section above
-- Review application logs for error details
-- Ensure all dependencies are properly installed
-- Verify hardware and network configuration
-
----
-
-_This documentation covers the complete setup and operation of the Hydra Terminal BLE payment system. For updates and additional information, refer to the project repository._
+_For updates and additional information, refer to the project repository._

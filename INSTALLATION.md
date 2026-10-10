@@ -2,6 +2,17 @@
 
 ## Quick Installation
 
+The shortest path on a Raspberry Pi is the one-shot script, which installs the dependencies,
+writes `.env`, deploys `src/` and enables the `hydra-terminal` systemd service:
+
+```bash
+API_BASE_URL=https://<backend> TERMINAL_API_KEY=<device key> ./scripts/raspberry-pi-setup.sh
+sudo journalctl -u hydra-terminal.service -f
+```
+
+`TERMINAL_API_KEY` is the device key of the merchant account, issued by the backend operator.
+Keep it only in `.env` on the device (never in git). The alternative step-by-step path follows.
+
 ### 1. Run the Setup Script
 
 ```bash
@@ -150,14 +161,20 @@ sudo setcap cap_net_raw+eip $(which node)
 getcap $(which node)
 ```
 
-#### 4. Port Already in Use
+#### 4. Terminal Exits at Start
+
+`Missing required env: API_BASE_URL` (or `TERMINAL_API_KEY`) means `.env` is missing or
+incomplete. Copy `.env.example` to `.env` and fill in both values.
+
+#### 5. No Payment Is Advertised
+
+The terminal advertises only while the backend has a pending request. Check the connection:
 
 ```bash
-# Check what's using port 3000
-sudo netstat -tulpn | grep :3000
-
-# Kill the process if needed
-sudo kill -9 <PID>
+set -a; . ./.env; set +a
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TERMINAL_API_KEY" \
+  "$API_BASE_URL/terminal/pending-payment"
+# 204 = connected, nothing pending; 200 = request pending; 401/403 = wrong key
 ```
 
 ### Validation Commands
@@ -223,7 +240,7 @@ sudo hcitool lescan
 
 ## Security Considerations
 
-1. **API Security**: Use HTTPS for production API endpoints
+1. **API Security**: Use an `https://` `API_BASE_URL`; the device key is sent as a Bearer token on every poll
 2. **Network Security**: Configure firewall rules if needed
 3. **Bluetooth Security**: Consider BLE pairing for production
 4. **Service Security**: Run service as non-root user (already configured)
