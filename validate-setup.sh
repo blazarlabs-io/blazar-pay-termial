@@ -216,8 +216,6 @@ check_project() {
         # Check specific dependencies
         if [ -d node_modules ]; then
             check "bleno package is installed" "[ -d node_modules/bleno ]" "true"
-            check "express package is installed" "[ -d node_modules/express ]" "true"
-            check "socket.io package is installed" "[ -d node_modules/socket.io ]" "true"
         fi
     fi
 }
@@ -226,15 +224,12 @@ check_project() {
 check_network() {
     log_info "Checking network connectivity..."
     
-    # Check if port 3000 is available
-    if command_exists netstat; then
-        if netstat -tuln | grep -q ":3000 "; then
-            log_warning "Port 3000 is already in use"
-        else
-            log_success "Port 3000 is available"
-        fi
+    # The terminal only talks to the backend (no local server): check the backend is reachable
+    API_URL=$(grep -E '^API_BASE_URL=' .env 2>/dev/null | cut -d= -f2-)
+    if [ -n "$API_URL" ] && command_exists curl; then
+        check "Backend reachable ($API_URL/health)" "curl -fsS -m 10 $API_URL/health" "true"
     else
-        log_warning "netstat not available, cannot check port 3000"
+        log_warning "API_BASE_URL not set or curl missing, cannot check the backend"
     fi
     
     # Check internet connectivity
