@@ -23,7 +23,7 @@ value4 paymentId), polls `GET /payments/:id` until confirmed, failed or expired,
 Run `npm test` for the unit tests. See QUICK_START.md.
 
 M3 runs on Cardano preprod only (BTC bridged from Bitcoin testnet3) against the custodial demo
-backend `https://blazar-api.cardano.vip`. Contactless transport: BLE. The terminal never authorizes,
+backend `https://blazar-api.cardano.vip`. Contactless transport: a static NFC tag on the case (see DOCUMENTATION.md, NFC Tag) and BLE. The terminal never authorizes,
 signs or sends payments, and nothing is written to it over BLE. Node.js 18+ is required.
 One-shot setup on a Raspberry Pi:
 
