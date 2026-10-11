@@ -101,6 +101,7 @@ Milestone 3 (USDM and BTC payments) runs on **Cardano preprod** only, with BTC b
 - **Display**: Small LCD for status monitoring
 - **LED Indicators**: Visual feedback for payment status
 - **Enclosure**: Weatherproof case for outdoor deployment
+- **NFC tag**: an NTAG213/215 sticker on the case (see [NFC Tag](#nfc-tag)); the Pi does not drive it
 
 ## Software Dependencies
 
@@ -186,6 +187,16 @@ The former write characteristic for the client address (`9b16159d-…`) is retir
 - **Service UUIDs**: `1d4ddcb2-279d-42e2-a95a-274352a25248`
 - **Connectable**: Yes
 - **When**: only while a payment request is pending; advertising stops when the payment is final
+
+### NFC Tag
+
+Phones can also find the terminal's payment by tapping a static NFC tag, with BLE as the alternative. The tag holds one NDEF URI record:
+
+```
+myapp://home/nfc?terminal=<terminal account id>
+```
+
+`<terminal account id>` is the `id` returned by `POST /accounts` when the terminal's merchant account was created. Write it once with a phone app such as NFC Tools (Write → URL/URI), or emulate it with a Flipper Zero (NFC → Add manually → NTAG215 → Emulate, then write the record from the phone). The app calls `GET /terminals/:id/pending-payment` with the payer's Firebase token and gets the same request the terminal is advertising. The tag never changes and the terminal software does nothing for it.
 
 ## API Integration
 
