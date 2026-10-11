@@ -206,8 +206,7 @@ check_project() {
     
     check "package.json exists" "[ -f package.json ]" "true"
     check "src/index.js exists" "[ -f src/index.js ]" "true"
-    check "src/socket.js exists" "[ -f src/socket.js ]" "true"
-    check "src/services.js exists" "[ -f src/services.js ]" "true"
+    check "src/payment.js exists" "[ -f src/payment.js ]" "true"
     check "src/characteristics.js exists" "[ -f src/characteristics.js ]" "true"
     
     # Check if node_modules exists
@@ -217,8 +216,6 @@ check_project() {
         # Check specific dependencies
         if [ -d node_modules ]; then
             check "bleno package is installed" "[ -d node_modules/bleno ]" "true"
-            check "express package is installed" "[ -d node_modules/express ]" "true"
-            check "socket.io package is installed" "[ -d node_modules/socket.io ]" "true"
         fi
     fi
 }
@@ -227,15 +224,12 @@ check_project() {
 check_network() {
     log_info "Checking network connectivity..."
     
-    # Check if port 3000 is available
-    if command_exists netstat; then
-        if netstat -tuln | grep -q ":3000 "; then
-            log_warning "Port 3000 is already in use"
-        else
-            log_success "Port 3000 is available"
-        fi
+    # The terminal only talks to the backend (no local server): check the backend is reachable
+    API_URL=$(grep -E '^API_BASE_URL=' .env 2>/dev/null | cut -d= -f2-)
+    if [ -n "$API_URL" ] && command_exists curl; then
+        check "Backend reachable ($API_URL/health)" "curl -fsS -m 10 $API_URL/health" "true"
     else
-        log_warning "netstat not available, cannot check port 3000"
+        log_warning "API_BASE_URL not set or curl missing, cannot check the backend"
     fi
     
     # Check internet connectivity
@@ -246,22 +240,10 @@ check_network() {
 check_api_config() {
     log_info "Checking API configuration..."
     
-    if [ -f src/services.js ]; then
-        if grep -q "API_BASE_URL" src/services.js; then
-            local api_url=$(grep "API_BASE_URL" src/services.js | head -1 | cut -d'"' -f2)
-            log_info "API URL configured: $api_url"
-            
-            # Try to reach the API (this might fail if API is not running)
-            if command_exists curl; then
-                if timeout 5 curl -s "$api_url" &>/dev/null; then
-                    log_success "API server is reachable"
-                else
-                    log_warning "API server is not reachable (might be normal if not running)"
-                fi
-            fi
-        else
-            log_error "API_BASE_URL not found in src/services.js"
-        fi
+    if [ -f .env ] && grep -q '^API_BASE_URL=.' .env && grep -q '^TERMINAL_API_KEY=.' .env; then
+        log_success ".env has API_BASE_URL and TERMINAL_API_KEY"
+    else
+        log_error ".env missing API_BASE_URL or TERMINAL_API_KEY (see .env.example)"
     fi
 }
 

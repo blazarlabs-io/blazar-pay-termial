@@ -389,7 +389,7 @@ main() {
     echo ""
     log_info "Next steps:"
     echo "1. Logout and login again to apply group changes"
-    echo "2. Configure your API endpoint in src/services.js"
+    echo "2. Configure your API endpoint in .env (API_BASE_URL, TERMINAL_API_KEY; see .env.example)"
     echo "3. Test the installation: npm run dev"
     echo "4. (Optional) Enable the systemd service: sudo systemctl enable hydra-terminal.service"
     echo ""
