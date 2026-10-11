@@ -13,7 +13,6 @@
 9. [Usage Guide](#usage-guide)
 10. [Troubleshooting](#troubleshooting)
 11. [Development](#development)
-12. [Known Limitations](#known-limitations)
 
 ## Overview
 
@@ -91,6 +90,7 @@ Milestone 3 (USDM and BTC payments) runs on **Cardano preprod** only, with BTC b
 
    - Stable WiFi connection with outbound HTTPS access to the backend
    - No inbound port is needed: the terminal only makes outgoing requests
+   - Keep NTP time sync enabled: the local expiry check uses the Pi clock
 
 4. **Power Requirements**:
    - 5V/2.5A power supply (USB-C)
@@ -352,14 +352,7 @@ For an end-to-end check, create a request in the merchant web and pay it with th
 - BLE data is public and unencrypted. It contains only the request (merchant address, amount, asset, payment id); nothing secret is advertised and nothing is accepted over BLE.
 - Use an `https://` `API_BASE_URL`; the device key is sent on every poll.
 - Keep `TERMINAL_API_KEY` only in `.env` on the device (ignored by git).
-
-## Known Limitations
-
-- Testnet/preprod only; custodial demo backend. One merchant, one terminal per merchant account.
-- Contactless transport: BLE. Proximity is a phone-side RSSI heuristic.
 - The device key has the full scope of the merchant account (it can also create payment requests); protect the SD card.
-- The local expiry check uses the Pi clock; keep NTP time sync enabled.
-- The terminal has been unit-tested; a BLE session on a Raspberry Pi against the live backend has not been recorded yet.
 
 ---
 
